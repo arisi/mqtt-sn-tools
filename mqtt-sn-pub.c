@@ -205,6 +205,21 @@ int main(int argc, char* argv[])
 
         // Publish to the topic
         mqtt_sn_send_publish(sock, topic_id, topic_id_type, message_data, qos, retain);
+        if (qos==1) {
+            int retries=0;
+            while (1) {
+                connack_packet_t *p= mqtt_sn_receive_packet(sock);
+                if ( p!= NULL && p->type==MQTT_SN_TYPE_PUBACK) {
+                    break;
+                } else 
+                    fprintf(stderr,"Warn: QoS 1 and send not acked -- retrying..\n");
+                if (retries++>10) {
+                    fprintf(stderr,"Error: QoS 1 and send not acked\n");
+                    exit(-1);
+                }
+                sleep(1);
+            }
+        }
         // Finally, disconnect
         if (qos >= 0) {
             mqtt_sn_send_disconnect(sock);

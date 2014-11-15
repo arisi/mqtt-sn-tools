@@ -64,8 +64,6 @@ Subscribing
       -p <port>      Network port to connect to. Defaults to 1883.
       -t <topic>     MQTT topic name to subscribe to.
       -T <topicid>   Pre-defined MQTT-SN topic ID to publish to.
-      -w <topic>     MQTT LWT topic name to publish to.
-      -W <message>   LWT Message payload to send.
       -v             Print messages verbosely, showing the topic name.
 
 

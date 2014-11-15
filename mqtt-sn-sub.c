@@ -169,7 +169,7 @@ int main(int argc, char* argv[])
     sock = mqtt_sn_create_socket(mqtt_sn_host, mqtt_sn_port);
     if (sock) {
         // Connect to gateway
-        mqtt_sn_send_connect(sock, client_id, keep_alive);
+        mqtt_sn_send_connect(sock, client_id,  MQTT_SN_FLAG_CLEAN, keep_alive);
         mqtt_sn_receive_connack(sock);
 
         // Subscribe to the topic
