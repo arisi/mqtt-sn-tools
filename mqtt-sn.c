@@ -117,6 +117,28 @@ int mqtt_sn_create_socket(const char* host, const char* port)
 void mqtt_sn_send_packet(int sock, const void* data)
 {
     size_t sent, len = ((uint8_t*)data)[0];
+    char t = ((uint8_t*)data)[1];
+   
+    if (debug) 
+     {	
+	int i;
+        fprintf(stderr, ">Sending %d bytes. Type=%s.\n>", (int)len, mqtt_sn_type_string(t) );
+	for (i=0;i<len;i++)
+	  {
+	     fprintf(stderr,"%02x ",((unsigned char *)data)[i]); 
+	  }
+	fprintf(stderr," | ");
+	for (i=0;i<len;i++)
+	  {
+	     unsigned char c=((unsigned char *)data)[i];
+	     if (isprint(c))
+		 fprintf(stderr,"%c",c);
+	     else
+		 fprintf(stderr,".");	       
+	  }
+	fprintf(stderr,"\n");
+     }
+   
 
     sent = send(sock, data, len, 0);
     if (sent != len) {
@@ -170,9 +192,18 @@ void* mqtt_sn_receive_packet(int sock)
         }
     }
 
-    if (debug)
-        fprintf(stderr, "Received %d bytes. Type=%s.\n", (int)bytes_read, mqtt_sn_type_string(buffer[1]));
-
+    if (debug) 
+     {
+	int i;
+        fprintf(stderr, "<Received %d bytes. Type=%s.\n<", (int)bytes_read, mqtt_sn_type_string(buffer[1]));
+	for (i=0;i<bytes_read;i++)
+	  {
+	     fprintf(stderr,"%02x ",buffer[i]); 
+	  }
+	fprintf(stderr,"\n");
+	
+     }
+   
     if (mqtt_sn_validate_packet(buffer, bytes_read) == FALSE) {
         return NULL;
     }
@@ -186,7 +217,7 @@ void* mqtt_sn_receive_packet(int sock)
     return buffer;
 }
 
-void mqtt_sn_send_connect(int sock, const char* client_id, uint16_t keepalive)
+void mqtt_sn_send_connect(int sock, const char* client_id, uint8_t flags, uint16_t keepalive)
 {
     connect_packet_t packet;
 
@@ -198,7 +229,7 @@ void mqtt_sn_send_connect(int sock, const char* client_id, uint16_t keepalive)
 
     // Create the CONNECT packet
     packet.type = MQTT_SN_TYPE_CONNECT;
-    packet.flags = MQTT_SN_FLAG_CLEAN;
+    packet.flags = flags;
     packet.protocol_id = MQTT_SN_PROTOCOL_ID;
     packet.duration = htons(keepalive);
 
@@ -220,6 +251,31 @@ void mqtt_sn_send_connect(int sock, const char* client_id, uint16_t keepalive)
     if (keepalive) {
         keep_alive = keepalive;
     }
+
+    return mqtt_sn_send_packet(sock, &packet);
+}
+
+void mqtt_sn_send_will_topic(int sock, const char* will_topic, uint8_t flags)
+{
+    will_topic_packet_t packet;
+
+    // Check that it isn't too long
+    if (will_topic && strlen(will_topic) > 23) {
+        fprintf(stderr, "Error: will topic is too long\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Create the WILLTOPIC packet
+    packet.type = MQTT_SN_TYPE_WILLTOPIC;
+    packet.flags = flags;
+    
+    strncpy(packet.topic_name, will_topic, sizeof(packet.topic_name)-1);
+    packet.topic_name[sizeof(packet.topic_name) - 1] = '\0';
+    
+    packet.length = 0x03 + strlen(packet.topic_name);
+
+    if (debug)
+        fprintf(stderr, "Sending WILLTOPIC packet...\n");
 
     return mqtt_sn_send_packet(sock, &packet);
 }
@@ -300,6 +356,26 @@ void mqtt_sn_send_publish(int sock, uint16_t topic_id, uint8_t topic_type, const
 
     if (debug)
         fprintf(stderr, "Sending PUBLISH packet...\n");
+
+    return mqtt_sn_send_packet(sock, &packet);
+}
+
+void mqtt_sn_send_will_msg(int sock, const void* data)
+{
+    will_msg_packet_t packet;
+    size_t data_len = strlen(data);
+
+    if (data_len > sizeof(packet.data)) {
+        fprintf(stderr, "Error: payload is too big\n");
+        exit(EXIT_FAILURE);
+    }
+
+    packet.type = MQTT_SN_TYPE_WILLMSG;
+    strncpy(packet.data, data, sizeof(packet.data));
+    packet.length = 0x02 + data_len;
+
+    if (debug)
+        fprintf(stderr, "Sending WILLMSG packet...\n");
 
     return mqtt_sn_send_packet(sock, &packet);
 }
@@ -399,6 +475,9 @@ static int mqtt_sn_process_register(int sock, const register_packet_t *packet)
     int message_id = ntohs(packet->message_id);
     int topic_id = ntohs(packet->topic_id);
     const char* topic_name = packet->topic_name;
+
+    if (debug)
+        fprintf(stderr, "Registered topic id:0x%2.2x '%s'\n", topic_id,topic_name);
 
     // Add it to the topic map
     mqtt_sn_register_topic(topic_id, topic_name);

@@ -93,6 +93,19 @@ typedef struct {
 typedef struct {
   uint8_t length;
   uint8_t type;
+  uint8_t flags;
+  char topic_name[MQTT_SN_MAX_TOPIC_LENGTH];
+} will_topic_packet_t;
+
+typedef struct {
+  uint8_t length;
+  uint8_t type;
+  char data[MQTT_SN_MAX_PACKET_LENGTH-7];
+} will_msg_packet_t;
+
+typedef struct {
+  uint8_t length;
+  uint8_t type;
   uint8_t return_code;
 } connack_packet_t;
 
@@ -156,7 +169,9 @@ typedef struct topic_map {
 
 // Library functions
 int mqtt_sn_create_socket(const char* host, const char* port);
-void mqtt_sn_send_connect(int sock, const char* client_id, uint16_t keepalive);
+void mqtt_sn_send_connect(int sock, const char* client_id, uint8_t flags, uint16_t keepalive);
+void mqtt_sn_send_will_topic(int sock, const char* will_topic, uint8_t flags);
+void mqtt_sn_send_will_msg(int sock, const void* data);
 void mqtt_sn_send_register(int sock, const char* topic_name);
 void mqtt_sn_send_publish(int sock, uint16_t topic_id, uint8_t topic_type, const void* data, int8_t qos, uint8_t retain);
 void mqtt_sn_send_subscribe_topic_name(int sock, const char* topic_name, uint8_t qos);

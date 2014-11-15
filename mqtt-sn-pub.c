@@ -38,7 +38,9 @@
 const char *client_id = NULL;
 const char *topic_name = NULL;
 const char *message_data = NULL;
-time_t keep_alive = 30;
+const char *t_topic_name = NULL;
+const char *t_message_data = NULL;
+time_t keep_alive = 1;
 const char *mqtt_sn_host = "127.0.0.1";
 const char *mqtt_sn_port = "1883";
 uint16_t topic_id = 0;
@@ -62,6 +64,8 @@ static void usage()
     fprintf(stderr, "  -r             Message should be retained.\n");
     fprintf(stderr, "  -t <topic>     MQTT topic name to publish to.\n");
     fprintf(stderr, "  -T <topicid>   Pre-defined MQTT-SN topic ID to publish to.\n");
+    fprintf(stderr, "  -w <topic>     MQTT LWT topic name to publish to.\n");
+    fprintf(stderr, "  -W <message>   LWT Message payload to send.\n");
     exit(-1);
 }
 
@@ -70,7 +74,7 @@ static void parse_opts(int argc, char** argv)
     int ch;
 
     // Parse the options/switches
-    while ((ch = getopt(argc, argv, "dh:i:m:np:q:rt:T:?")) != -1)
+    while ((ch = getopt(argc, argv, "dh:i:m:w:W:np:q:rt:T:?")) != -1)
         switch (ch) {
         case 'd':
             debug = TRUE;
@@ -86,6 +90,10 @@ static void parse_opts(int argc, char** argv)
 
         case 'm':
             message_data = optarg;
+        break;
+
+        case 'W':
+            t_message_data = optarg;
         break;
 
         case 'n':
@@ -108,6 +116,10 @@ static void parse_opts(int argc, char** argv)
             topic_name = optarg;
         break;
 
+        case 'w':
+            t_topic_name = optarg;
+        break;
+
         case 'T':
             topic_id = atoi(optarg);
         break;
@@ -123,8 +135,8 @@ static void parse_opts(int argc, char** argv)
         usage();
     }
 
-    if (qos != -1 && qos != 0) {
-        fprintf(stderr, "Error: only QoS level 0 or -1 is supported.\n");
+    if (qos != -1 && qos != 0 && qos != 1) {
+        fprintf(stderr, "Error: only QoS level 1, 0 or -1 is supported.\n");
         exit(-1);
     }
 
@@ -150,16 +162,33 @@ int main(int argc, char* argv[])
 
     // Enable debugging?
     mqtt_sn_set_debug(debug);
-
     // Create a UDP socket
     sock = mqtt_sn_create_socket(mqtt_sn_host, mqtt_sn_port);
     if (sock) {
         // Connect to gateway
         if (qos >= 0) {
-            mqtt_sn_send_connect(sock, client_id, keep_alive);
-            mqtt_sn_receive_connack(sock);
+           if (qos==0) {
+                mqtt_sn_send_connect(sock, client_id, MQTT_SN_FLAG_CLEAN, keep_alive);
+                mqtt_sn_receive_connack(sock);
+            } else if (qos==1) {
+                mqtt_sn_send_connect(sock, client_id, MQTT_SN_FLAG_CLEAN | MQTT_SN_FLAG_WILL , keep_alive);
+                connack_packet_t *p= mqtt_sn_receive_packet(sock);
+                if ( p!= NULL && p->type==MQTT_SN_TYPE_WILLTOPICREQ) {
+                    mqtt_sn_send_will_topic(sock, t_topic_name, MQTT_SN_FLAG_QOS_1 | MQTT_SN_FLAG_RETAIN);
+                    p= mqtt_sn_receive_packet(sock);
+                    if ( p!= NULL && p->type==MQTT_SN_TYPE_WILLMSGREQ) {
+                        mqtt_sn_send_will_msg(sock, t_message_data);
+                    } else {
+                        fprintf(stderr,"Error: did not get MQTT_SN_TYPE_WILLMSGREQ.\n");
+                        exit(-1);
+                    }
+                } else {
+                    fprintf(stderr,"Error: did not get MQTT_SN_TYPE_WILLTOPICREQ.\n");
+                    exit(-1);
+                }
+                mqtt_sn_receive_connack(sock);
+            }
         }
-
         if (topic_id) {
             // Use pre-defined topic ID
             topic_id_type = MQTT_SN_TOPIC_TYPE_PREDEFINED;
@@ -168,15 +197,14 @@ int main(int argc, char* argv[])
             topic_id = (topic_name[0] << 8) + topic_name[1];
             topic_id_type = MQTT_SN_TOPIC_TYPE_SHORT;
         } else if (qos >= 0) {
-            // Register the topic name
-            mqtt_sn_send_register(sock, topic_name);
-            topic_id = mqtt_sn_receive_regack(sock);
-            topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
+             // Register the topic name
+             mqtt_sn_send_register(sock, topic_name);
+             topic_id = mqtt_sn_receive_regack(sock);
+             topic_id_type = MQTT_SN_TOPIC_TYPE_NORMAL;
         }
 
         // Publish to the topic
         mqtt_sn_send_publish(sock, topic_id, topic_id_type, message_data, qos, retain);
-
         // Finally, disconnect
         if (qos >= 0) {
             mqtt_sn_send_disconnect(sock);
